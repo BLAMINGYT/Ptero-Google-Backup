@@ -200,7 +200,7 @@ Enter the code from that page here:
 1. Copy the URL and open in browser
 2. Login with your Google account
 3. Click **Allow** to grant permissions
-4. Copy the authorization code
+4. Copy the authorization code **From The Url**
 5. Paste it in the terminal
 6. Press Enter
 
