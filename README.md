@@ -62,6 +62,14 @@ cd pterodactyl-backup
 
 ### Step 2: Install Dependencies
 
+## For Py Use this 
+
+```bash
+pip install requests schedule python-dotenv google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client pytz
+```
+
+
+## For Nodejs Do This
 Create a `package.json` file:
 
 ```json
