@@ -8,7 +8,7 @@ Automated backup solution for Pterodactyl game servers with Google Drive integra
 
 ## ✨ Features
 
-- 🔄 **Automatic Backups**: Runs every 20 minutes
+- 🔄 **Automatic Backups**: Runs every 30 minutes
 - 🌏 **Indian Timezone (IST)**: All timestamps in Asia/Kolkata time
 - 📁 **Dual Storage**: Regular backups + Daily snapshots
 - 🗑️ **Smart Cleanup**: Auto-deletes old backups from Pterodactyl and Google Drive
@@ -20,14 +20,16 @@ Automated backup solution for Pterodactyl game servers with Google Drive integra
 
 ## 📋 Requirements
 
-### 1. **Node.js & npm**
+### 1. **Node.js & npm Or Python**
 - Node.js v14 or higher
 - npm (comes with Node.js)
+- Python Works
 
 ```bash
 # Check your versions
 node --version
 npm --version
+python --version
 ```
 
 ### 2. **Pterodactyl Panel**
