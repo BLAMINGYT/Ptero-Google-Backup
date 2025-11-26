@@ -281,6 +281,10 @@ Cron schedule examples:
 
 ---
 
+
+### 🥀Access Details
+
+
 ## 🏃 Running as a Service
 
 ### Using PM2 (Recommended)
@@ -450,7 +454,7 @@ Created with ❤️ for the Pterodactyl community
 
 | Feature | Description |
 |---------|-------------|
-| 🔄 Auto Backup | Every 20 minutes |
+| 🔄 Auto Backup | Every 30 minutes |
 | 🌏 IST Timezone | Indian Standard Time |
 | 📁 Main Storage | Last 3 backups |
 | 📅 Daily Archive | Last 5 days at 11:59 PM |
