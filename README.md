@@ -152,9 +152,14 @@ python backup_script.py
 On first run, the script will:
 1. Open your browser for Google OAuth authorization
 2. Ask you to sign in and grant permissions
-3. Save authentication token to `token.json`
-4. Start the initial backup
-5. Schedule recurring backups
+3. After that you will be redirected to local host with url then copy the url and then extract the code part
+**http://localhost/?code=4/0Ab32j82l17IULzm4qPbbX3hcHyahQoTNcXwFuafwaeH0aJt1lKkzXF0N5-9OPxc2jpC5wQ&scope=https://www.googleapis.com/auth/drive.file**
+     ```bash
+     Code will be :-4/0Ab32j82l17IULzm4qPbbX3hcHyahQoTNcXwFuafwaeH0aJt1lKkzXF0N5-9OPxc2jpC5wQ
+     ```
+     **Cheak the code for your and paste in the cmd prompt**
+5. Start the initial backup
+6. Schedule recurring backups
 
 ### Interactive Commands
 
