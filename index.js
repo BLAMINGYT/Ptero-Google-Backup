@@ -21,18 +21,17 @@ const config = {
     apiKey: process.env.PTERO_API_KEY,
     panelUrl: process.env.PTERO_PANEL_URL,
     serverId: process.env.PTERO_SERVER_ID,
-    maxBackupsOnServer: 2, // Maximum backups allowed on Pterodactyl
   },
   google: {
-    folderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
-    daysFolderId: process.env.GOOGLE_DRIVE_DAYS_FOLDER_ID, // New: Days subfolder
+    mainFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
+    daysFolderId: process.env.GOOGLE_DRIVE_DAYS_FOLDER_ID,
   },
   tempDir: path.join(__dirname, 'temp_backups'),
   logsDir: path.join(__dirname, 'logs'),
   credentialsPath: path.join(__dirname, 'credentials.json'),
   tokenPath: path.join(__dirname, 'token.json'),
   maxBackups: 3,
-  maxDailyBackups: 5, // Keep last 5 days in the days folder
+  maxDailyBackups: 5,
   initialDelay: 30000,
   pollInterval: 10000,
   pollTimeout: 900000,
@@ -48,7 +47,7 @@ function ensureLogsDir() {
 }
 
 function initializeLogFile() {
-  const logFileName = `backup_${dayjs().tz().format('YYYY-MM-DD')}.log`;
+  const logFileName = `backup_${dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD')}.log`;
   const logPath = path.join(config.logsDir, logFileName);
   logStream = fs.createWriteStream(logPath, { flags: 'a' });
 }
@@ -60,7 +59,7 @@ console.log = (...args) => {
   const message = args.join(' ');
   originalConsoleLog(message);
   if (logStream) {
-    const timestamp = dayjs().tz().format('YYYY-MM-DD HH:mm:ss');
+    const timestamp = dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss');
     logStream.write(`[${timestamp}] ${message}\n`);
   }
 };
@@ -69,7 +68,7 @@ console.error = (...args) => {
   const message = args.join(' ');
   originalConsoleError(message);
   if (logStream) {
-    const timestamp = dayjs().tz().format('YYYY-MM-DD HH:mm:ss');
+    const timestamp = dayjs().tz('Asia/Kolkata').format('YYYY-MM-DD HH:mm:ss');
     logStream.write(`[${timestamp}] ERROR: ${message}\n`);
   }
 };
@@ -81,6 +80,10 @@ function validateConfig() {
   if (missing.length > 0) {
     console.error('❌ Missing required environment variables:', missing.join(', '));
     process.exit(1);
+  }
+
+  if (!process.env.GOOGLE_DRIVE_DAYS_FOLDER_ID) {
+    console.log('⚠️  GOOGLE_DRIVE_DAYS_FOLDER_ID not set - daily backups feature disabled');
   }
 }
 
@@ -162,41 +165,41 @@ const pteroClient = axios.create({
   },
 });
 
-async function listPteroBackups() {
-  console.log('📋 Checking existing backups on Pterodactyl...');
+async function getAllBackups() {
+  console.log('📋 Fetching existing backups...');
   const response = await pteroClient.get(`/servers/${config.ptero.serverId}/backups`);
-  const backups = response.data.data.map(b => ({
-    id: b.attributes.uuid,
-    name: b.attributes.name,
-    createdAt: b.attributes.created_at,
-  }));
-  console.log(`   Found ${backups.length} backup(s) on server`);
+  const backups = response.data.data;
+  console.log(`📊 Found ${backups.length} existing backup(s) on Pterodactyl`);
   return backups;
 }
 
-async function deleteOldestPteroBackup() {
-  const backups = await listPteroBackups();
-  
-  if (backups.length >= config.ptero.maxBackupsOnServer) {
-    // Sort by creation date (oldest first)
-    backups.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    const oldestBackup = backups[0];
+async function deleteOldestBackupIfLimitReached() {
+  const backups = await getAllBackups();
+
+  if (backups.length >= 3) {
+    console.log('⚠️  Backup limit reached, deleting oldest backup...');
     
-    console.log(`🗑️  Deleting oldest backup: ${oldestBackup.name}`);
-    await pteroClient.delete(`/servers/${config.ptero.serverId}/backups/${oldestBackup.id}`);
-    console.log('✅ Oldest backup deleted from Pterodactyl');
+    const sortedBackups = backups.sort((a, b) => 
+      new Date(a.attributes.created_at) - new Date(b.attributes.created_at)
+    );
     
-    // Wait a bit for the deletion to process
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    const oldestBackup = sortedBackups[0];
+    const backupId = oldestBackup.attributes.uuid;
+    
+    try {
+      await pteroClient.delete(`/servers/${config.ptero.serverId}/backups/${backupId}`);
+      console.log(`✅ Deleted oldest backup: ${backupId}`);
+    } catch (error) {
+      console.error('❌ Failed to delete old backup:', error.message);
+      throw error;
+    }
   }
 }
 
 async function createBackup() {
-  console.log('🚀 Creating backup...');
+  await deleteOldestBackupIfLimitReached();
   
-  // Check and delete if limit reached
-  await deleteOldestPteroBackup();
-  
+  console.log('🚀 Creating new backup...');
   const response = await pteroClient.post(`/servers/${config.ptero.serverId}/backups`);
   const backupId = response.data.attributes.uuid;
   console.log(`✅ Backup created: ${backupId}`);
@@ -273,18 +276,39 @@ async function deleteBackupFromPtero(backupId) {
   }
 }
 
-async function uploadToGoogleDrive(localPath) {
-  console.log('☁️  Uploading to Google Drive...');
+async function uploadBackupToServer(localPath) {
+  console.log('📤 Uploading backup to Pterodactyl server...');
+  
+  // Get upload URL
+  const response = await pteroClient.get(`/servers/${config.ptero.serverId}/files/upload`);
+  const uploadUrl = response.data.attributes.url;
+  
+  // Upload file using FormData
+  const FormData = require('form-data');
+  const form = new FormData();
+  form.append('files', fs.createReadStream(localPath));
+  
+  await axios.post(uploadUrl, form, {
+    headers: form.getHeaders(),
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
+  
+  console.log('✅ Backup uploaded to server successfully!');
+  return true;
+}
+
+async function uploadToGoogleDrive(localPath, folderId, fileName) {
+  console.log(`☁️  Uploading to Google Drive (${fileName})...`);
   
   const drive = await initGoogleDrive();
-  const fileName = `${dayjs().tz().format('DD-MMM-hA')}.tar.gz`;
   const fileSize = fs.statSync(localPath).size;
   const fileStream = fs.createReadStream(localPath);
 
   const response = await drive.files.create({
     requestBody: {
       name: fileName,
-      parents: [config.google.folderId],
+      parents: [folderId],
     },
     media: {
       mimeType: 'application/gzip',
@@ -297,50 +321,39 @@ async function uploadToGoogleDrive(localPath) {
   return response.data;
 }
 
-async function uploadToDaysFolder(localPath) {
-  if (!config.google.daysFolderId) {
-    console.log('⚠️  Days folder ID not configured, skipping daily backup');
-    return null;
-  }
-
-  console.log('📅 Uploading to Days folder...');
+async function downloadFromGoogleDrive(fileId, localPath) {
+  console.log('⬇️  Downloading from Google Drive...');
   
   const drive = await initGoogleDrive();
-  const fileName = `${dayjs().tz().format('DD-MMM-YYYY')}.tar.gz`;
-  const fileSize = fs.statSync(localPath).size;
-  const fileStream = fs.createReadStream(localPath);
-
-  const response = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [config.google.daysFolderId],
-    },
-    media: {
-      mimeType: 'application/gzip',
-      body: fileStream,
-    },
-    fields: 'id, name, createdTime',
-  });
-
-  console.log(`✅ Daily backup uploaded: ${fileName} (${(fileSize / 1024 / 1024).toFixed(2)} MB)`);
-  return response.data;
+  const dest = fs.createWriteStream(localPath);
+  
+  const response = await drive.files.get(
+    { fileId: fileId, alt: 'media' },
+    { responseType: 'stream' }
+  );
+  
+  await pipeline(response.data, dest);
+  
+  const stats = fs.statSync(localPath);
+  console.log(`✅ Download complete: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+  return localPath;
 }
 
-async function cleanupOldBackups() {
-  console.log('🧹 Cleaning up old backups in main folder...');
+async function cleanupOldBackups(folderId, maxBackups) {
+  console.log(`🧹 Cleaning up old backups (max: ${maxBackups})...`);
   
   const drive = await initGoogleDrive();
   const response = await drive.files.list({
-    q: `'${config.google.folderId}' in parents and trashed=false`,
+    q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id, name, createdTime)',
     orderBy: 'createdTime desc',
   });
 
   const files = response.data.files;
-  console.log(`📊 Found ${files.length} backup(s) in main folder`);
+  console.log(`📊 Found ${files.length} backup(s) in folder`);
 
-  if (files.length > config.maxBackups) {
-    const filesToDelete = files.slice(config.maxBackups);
+  if (files.length > maxBackups) {
+    const filesToDelete = files.slice(maxBackups);
     console.log(`🗑️  Deleting ${filesToDelete.length} old backup(s)...`);
 
     for (const file of filesToDelete) {
@@ -350,46 +363,10 @@ async function cleanupOldBackups() {
   }
 }
 
-async function cleanupOldDailyBackups() {
-  if (!config.google.daysFolderId) {
-    return;
-  }
-
-  console.log('🧹 Cleaning up old daily backups in days folder...');
-  
-  const drive = await initGoogleDrive();
-  const response = await drive.files.list({
-    q: `'${config.google.daysFolderId}' in parents and trashed=false`,
-    fields: 'files(id, name, createdTime)',
-    orderBy: 'createdTime desc',
-  });
-
-  const files = response.data.files;
-  console.log(`📊 Found ${files.length} daily backup(s)`);
-
-  if (files.length > config.maxDailyBackups) {
-    const filesToDelete = files.slice(config.maxDailyBackups);
-    console.log(`🗑️  Deleting ${filesToDelete.length} old daily backup(s)...`);
-
-    for (const file of filesToDelete) {
-      await drive.files.delete({ fileId: file.id });
-      console.log(`   ✅ Deleted: ${file.name}`);
-    }
-  }
-}
-
-function isDailyBackupTime() {
-  const now = dayjs().tz();
-  const hour = now.hour();
-  const minute = now.minute();
-  
-  // Check if it's 11:59 PM (23:59)
-  return hour === 23 && minute === 59;
-}
-
-async function runBackupCycle() {
+async function runBackupCycle(isDailyBackup = false) {
+  const now = dayjs().tz('Asia/Kolkata');
   console.log('\n' + '='.repeat(60));
-  console.log(`🕐 Backup cycle started: ${dayjs().tz().format('YYYY-MM-DD HH:mm:ss')}`);
+  console.log(`🕐 ${isDailyBackup ? 'DAILY' : 'REGULAR'} Backup cycle started: ${now.format('YYYY-MM-DD HH:mm:ss')} IST`);
   console.log('='.repeat(60));
 
   let backupId = null;
@@ -400,22 +377,24 @@ async function runBackupCycle() {
     await waitForBackupCompletion(backupId);
     const downloadUrl = await getBackupDownloadUrl(backupId);
     
-    const fileName = `backup_${dayjs().tz().format('YYYY-MM-DD_HH-mm-ss')}.tar.gz`;
-    localPath = path.join(config.tempDir, fileName);
+    const tempFileName = `backup_${now.format('YYYY-MM-DD_HH-mm-ss')}.tar.gz`;
+    localPath = path.join(config.tempDir, tempFileName);
     await downloadBackup(downloadUrl, localPath);
-    
+
     // Upload to main folder
-    await uploadToGoogleDrive(localPath);
-    
-    // Check if it's time for daily backup (11:59 PM)
-    if (isDailyBackupTime()) {
-      console.log('🌙 Daily backup time detected!');
-      await uploadToDaysFolder(localPath);
-      await cleanupOldDailyBackups();
+    const mainFileName = `${now.format('DD-MMM-hA')}.tar.gz`;
+    await uploadToGoogleDrive(localPath, config.google.mainFolderId, mainFileName);
+    await cleanupOldBackups(config.google.mainFolderId, config.maxBackups);
+
+    // If it's a daily backup, also upload to days folder
+    if (isDailyBackup && config.google.daysFolderId) {
+      console.log('\n📅 Uploading daily backup to "days" folder...');
+      const dailyFileName = `${now.format('DD-MMM-YYYY')}.tar.gz`;
+      await uploadToGoogleDrive(localPath, config.google.daysFolderId, dailyFileName);
+      await cleanupOldBackups(config.google.daysFolderId, config.maxDailyBackups);
     }
-    
+
     await deleteBackupFromPtero(backupId);
-    await cleanupOldBackups();
 
     if (fs.existsSync(localPath)) {
       fs.unlinkSync(localPath);
@@ -432,9 +411,104 @@ async function runBackupCycle() {
   console.log('='.repeat(60) + '\n');
 }
 
+// ==================== RESTORE COMMAND ====================
+async function restoreBackupFromDrive(fileId) {
+  console.log('\n' + '='.repeat(60));
+  console.log('🔄 RESTORE BACKUP FROM GOOGLE DRIVE');
+  console.log('='.repeat(60));
+  
+  let localPath = null;
+  
+  try {
+    const drive = await initGoogleDrive();
+    
+    // Get file info
+    const fileInfo = await drive.files.get({
+      fileId: fileId,
+      fields: 'name, size'
+    });
+    
+    const fileName = fileInfo.data.name;
+    const fileSizeMB = (parseInt(fileInfo.data.size || 0) / 1024 / 1024).toFixed(2);
+    
+    console.log(`📋 File: ${fileName} (${fileSizeMB} MB)`);
+    console.log(`📋 File ID: ${fileId}`);
+    
+    // Download from Google Drive
+    localPath = path.join(config.tempDir, `restore_${fileName}`);
+    await downloadFromGoogleDrive(fileId, localPath);
+    
+    // Upload to Pterodactyl server
+    await uploadBackupToServer(localPath);
+    
+    // Cleanup
+    if (fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+      console.log('🗑️  Local file deleted');
+    }
+    
+    console.log('✅ Restore completed successfully!');
+    console.log('='.repeat(60) + '\n');
+    
+  } catch (error) {
+    console.error('❌ Restore failed:', error.message);
+    
+    if (localPath && fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+    }
+    
+    console.log('='.repeat(60) + '\n');
+  }
+}
+
+// ==================== COMMAND HANDLER ====================
+function setupCommandListener() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: ''
+  });
+
+  rl.on('line', async (line) => {
+    const parts = line.trim().split(/\s+/);
+    
+    if (parts.length === 0 || !parts[0]) {
+      return;
+    }
+    
+    const cmd = parts[0].toLowerCase();
+    
+    if (cmd === 'upload') {
+      if (parts.length < 2) {
+        console.log('❌ Usage: upload <google_drive_file_id>');
+        console.log('Example: upload 1a2b3c4d5e6f7g8h9i0j');
+        return;
+      }
+      
+      const fileId = parts[1].trim();
+      await restoreBackupFromDrive(fileId);
+    }
+    else if (cmd === 'help') {
+      console.log('\n📚 Available Commands:');
+      console.log('  upload <file_id>  - Download backup from Google Drive and upload to server');
+      console.log('  help              - Show this help message');
+      console.log('  exit              - Stop the script');
+      console.log();
+    }
+    else if (cmd === 'exit') {
+      console.log('👋 Exiting...');
+      if (logStream) logStream.end();
+      process.exit(0);
+    }
+    else {
+      console.log(`❌ Unknown command: ${cmd}`);
+      console.log('Type "help" for available commands');
+    }
+  });
+}
+
 async function main() {
-  console.log('\n🎯 Pterodactyl Auto-Backup (Enhanced Version)\n');
-  console.log(`🌏 Timezone: Asia/Kolkata (IST)\n`);
+  console.log('\n🎯 Pterodactyl Auto-Backup (Enhanced Node.js Version)\n');
 
   validateConfig();
   ensureTempDir();
@@ -444,13 +518,12 @@ async function main() {
   console.log('⚙️  Configuration:');
   console.log(`   Panel: ${config.ptero.panelUrl}`);
   console.log(`   Server: ${config.ptero.serverId}`);
-  console.log(`   Main Folder: ${config.google.folderId}`);
+  console.log(`   Main Folder: ${config.google.mainFolderId}`);
   console.log(`   Days Folder: ${config.google.daysFolderId || 'Not configured'}`);
   console.log(`   Max Backups (Main): ${config.maxBackups}`);
-  console.log(`   Max Daily Backups: ${config.maxDailyBackups}`);
-  console.log(`   Max Ptero Backups: ${config.ptero.maxBackupsOnServer}\n`);
+  console.log(`   Max Backups (Daily): ${config.maxDailyBackups}`);
+  console.log(`   Timezone: Asia/Kolkata (IST)\n`);
 
-  // Initialize Google Drive
   console.log('🔐 Initializing Google Drive...');
   await initGoogleDrive();
   console.log('✅ Google Drive ready!\n');
@@ -458,18 +531,33 @@ async function main() {
   console.log('🚀 Running initial backup...');
   await runBackupCycle();
 
-  console.log('⏰ Setting up automated backups...');
-  console.log('📅 Regular backups: Every 20 minutes');
-  console.log('🌙 Daily backup: Every day at 11:59 PM IST');
-  
+  // Regular backups every 20 minutes
   cron.schedule('*/20 * * * *', async () => {
-    await runBackupCycle();
+    await runBackupCycle(false);
   }, {
     timezone: 'Asia/Kolkata'
   });
 
-  console.log('✅ Cron scheduled successfully');
-  console.log('📝 Press Ctrl+C to stop\n');
+  // Daily backup at 11:59 PM IST
+  if (config.google.daysFolderId) {
+    cron.schedule('59 23 * * *', async () => {
+      await runBackupCycle(true);
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+    console.log('✅ Daily backup scheduled: 11:59 PM IST');
+  }
+
+  console.log('✅ Regular backup scheduled: Every 20 minutes (IST)');
+  
+  console.log('\n📝 Available Commands:');
+  console.log('  upload <file_id>  - Restore backup from Google Drive');
+  console.log('  help              - Show help message');
+  console.log('  exit              - Stop the script');
+  console.log('\n💡 Type a command or press Ctrl+C to stop\n');
+  
+  // Setup command listener
+  setupCommandListener();
 }
 
 process.on('SIGINT', () => {
