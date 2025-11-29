@@ -461,6 +461,127 @@ async function restoreBackupFromDrive(fileId) {
   }
 }
 
+// ==================== DISK UPLOAD TO SERVER ====================
+async function diskUploadToServer(serverPath) {
+  console.log('\n' + '='.repeat(60));
+  console.log('📤 UPLOAD FILE FROM SERVER DISK TO PTERODACTYL');
+  console.log('='.repeat(60));
+  
+  try {
+    console.log(`📋 Server Path: ${serverPath}`);
+    
+    // Create a backup from the specified path
+    console.log('🚀 Creating backup from specified path...');
+    const response = await pteroClient.post(`/servers/${config.ptero.serverId}/backups`, {
+      ignored: `*\n!${serverPath}`  // Backup only the specified path
+    });
+    
+    const backupId = response.data.attributes.uuid;
+    console.log(`✅ Backup created: ${backupId}`);
+    
+    await waitForBackupCompletion(backupId);
+    const downloadUrl = await getBackupDownloadUrl(backupId);
+    
+    const now = dayjs().tz('Asia/Kolkata');
+    const fileName = `disk_${path.basename(serverPath)}_${now.format('YYYY-MM-DD_HH-mm-ss')}.tar.gz`;
+    const localPath = path.join(config.tempDir, fileName);
+    
+    await downloadBackup(downloadUrl, localPath);
+    await uploadToGoogleDrive(localPath, config.google.mainFolderId, fileName);
+    await deleteBackupFromPtero(backupId);
+    
+    if (fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+      console.log('🗑️  Local file deleted');
+    }
+    
+    console.log('✅ Disk upload completed successfully!');
+    console.log('='.repeat(60) + '\n');
+    
+  } catch (error) {
+    console.error('❌ Disk upload failed:', error.message);
+    console.log('='.repeat(60) + '\n');
+  }
+}
+
+// ==================== DISK DOWNLOAD FROM DRIVE ====================
+async function diskDownloadFromDrive(fileId) {
+  console.log('\n' + '='.repeat(60));
+  console.log('⬇️  DOWNLOAD FILE FROM GOOGLE DRIVE TO SERVER');
+  console.log('='.repeat(60));
+  
+  let localPath = null;
+  
+  try {
+    const drive = await initGoogleDrive();
+    
+    // Get file info
+    const fileInfo = await drive.files.get({
+      fileId: fileId,
+      fields: 'name, size'
+    });
+    
+    const fileName = fileInfo.data.name;
+    const fileSizeMB = (parseInt(fileInfo.data.size || 0) / 1024 / 1024).toFixed(2);
+    
+    console.log(`📋 File: ${fileName} (${fileSizeMB} MB)`);
+    console.log(`📋 File ID: ${fileId}`);
+    
+    // Download from Google Drive
+    localPath = path.join(config.tempDir, `download_${fileName}`);
+    await downloadFromGoogleDrive(fileId, localPath);
+    
+    // Upload to Pterodactyl server
+    await uploadBackupToServer(localPath);
+    
+    // Cleanup
+    if (fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+      console.log('🗑️  Local file deleted');
+    }
+    
+    console.log('✅ Download to server completed successfully!');
+    console.log('='.repeat(60) + '\n');
+    
+  } catch (error) {
+    console.error('❌ Download failed:', error.message);
+    
+    if (localPath && fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+    }
+    
+    console.log('='.repeat(60) + '\n');
+  }
+}
+
+// ==================== DRIVE UPLOAD FROM LOCAL ====================
+async function driveUploadFromLocal(localFilePath) {
+  console.log('\n' + '='.repeat(60));
+  console.log('☁️  UPLOAD FILE FROM LOCAL TO GOOGLE DRIVE');
+  console.log('='.repeat(60));
+  
+  try {
+    if (!fs.existsSync(localFilePath)) {
+      throw new Error(`File not found: ${localFilePath}`);
+    }
+    
+    const fileName = path.basename(localFilePath);
+    const fileSize = fs.statSync(localFilePath).size / 1024 / 1024;
+    
+    console.log(`📋 File: ${fileName} (${fileSize.toFixed(2)} MB)`);
+    console.log(`📋 Local Path: ${localFilePath}`);
+    
+    await uploadToGoogleDrive(localFilePath, config.google.mainFolderId, fileName);
+    
+    console.log('✅ Upload to Drive completed successfully!');
+    console.log('='.repeat(60) + '\n');
+    
+  } catch (error) {
+    console.error('❌ Upload failed:', error.message);
+    console.log('='.repeat(60) + '\n');
+  }
+}
+
 // ==================== COMMAND HANDLER ====================
 function setupCommandListener() {
   const rl = readline.createInterface({
@@ -488,11 +609,51 @@ function setupCommandListener() {
       const fileId = parts[1].trim();
       await restoreBackupFromDrive(fileId);
     }
+    else if (cmd === 'dskup') {
+      if (parts.length < 2) {
+        console.log('❌ Usage: dskup <server_file_path>');
+        console.log('Example: dskup /world/region/r.0.0.mca');
+        console.log('Example: dskup plugins/MyPlugin');
+        return;
+      }
+      
+      const serverPath = parts.slice(1).join(' ').trim();
+      await diskUploadToServer(serverPath);
+    }
+    else if (cmd === 'dskdn') {
+      if (parts.length < 2) {
+        console.log('❌ Usage: dskdn <google_drive_file_id>');
+        console.log('Example: dskdn 1a2b3c4d5e6f7g8h9i0j');
+        return;
+      }
+      
+      const fileId = parts[1].trim();
+      await diskDownloadFromDrive(fileId);
+    }
+    else if (cmd === 'driup') {
+      if (parts.length < 2) {
+        console.log('❌ Usage: driup <local_file_path>');
+        console.log('Example: driup /home/user/myfile.zip');
+        console.log('Example: driup ./backup.tar.gz');
+        return;
+      }
+      
+      const localPath = parts.slice(1).join(' ').trim();
+      await driveUploadFromLocal(localPath);
+    }
+    else if (cmd === 'backup') {
+      console.log('🚀 Running manual backup cycle...');
+      await runBackupCycle(false);
+    }
     else if (cmd === 'help') {
       console.log('\n📚 Available Commands:');
-      console.log('  upload <file_id>  - Download backup from Google Drive and upload to server');
-      console.log('  help              - Show this help message');
-      console.log('  exit              - Stop the script');
+      console.log('  upload <file_id>    - Download backup from Google Drive and upload to server');
+      console.log('  dskup <path>        - Upload file from server disk to Google Drive');
+      console.log('  dskdn <file_id>     - Download from Google Drive and upload to server disk');
+      console.log('  driup <local_path>  - Upload file from local folder to Google Drive');
+      console.log('  backup              - Run backup cycle manually');
+      console.log('  help                - Show this help message');
+      console.log('  exit                - Stop the script');
       console.log();
     }
     else if (cmd === 'exit') {
@@ -551,9 +712,13 @@ async function main() {
   console.log('✅ Regular backup scheduled: Every 20 minutes (IST)');
   
   console.log('\n📝 Available Commands:');
-  console.log('  upload <file_id>  - Restore backup from Google Drive');
-  console.log('  help              - Show help message');
-  console.log('  exit              - Stop the script');
+  console.log('  upload <file_id>    - Restore backup from Google Drive to server');
+  console.log('  dskup <path>        - Upload file from server disk to Google Drive');
+  console.log('  dskdn <file_id>     - Download from Drive and upload to server disk');
+  console.log('  driup <local_path>  - Upload file from local folder to Google Drive');
+  console.log('  backup              - Run backup cycle manually');
+  console.log('  help                - Show help message');
+  console.log('  exit                - Stop the script');
   console.log('\n💡 Type a command or press Ctrl+C to stop\n');
   
   // Setup command listener
