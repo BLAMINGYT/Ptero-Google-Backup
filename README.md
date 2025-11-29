@@ -1,335 +1,403 @@
-# 🚀 Pterodactyl Auto-Backup Script
+# 🚀 Pterodactyl Auto-Backup to Google Drive
 
 **Owner:** [Blamingyt](https://github.com/Blamingyt)
 
-Automated backup solution for Pterodactyl game servers with Google Drive integration. Features automatic backup rotation, Indian timezone support, and daily snapshot archiving.
-
----
+Automatically backup your Pterodactyl game server to Google Drive with intelligent rotation and Indian Standard Time support.
 
 ## ✨ Features
 
-- 🔄 **Automatic Backups**: Runs every 30 minutes
-- 🌏 **Indian Timezone (IST)**: All timestamps in Asia/Kolkata time
-- 📁 **Dual Storage**: Regular backups + Daily snapshots
-- 🗑️ **Smart Cleanup**: Auto-deletes old backups from Pterodactyl and Google Drive
-- 📅 **Daily Snapshots**: Special backup at 11:59 PM saved for 5 days
-- 📝 **Detailed Logging**: Daily log files with timestamps
-- ☁️ **Google Drive**: Secure cloud storage with OAuth 2.0
+- ✅ **Automatic Pterodactyl backup management** - Deletes oldest backup when limit reached
+- ✅ **Dual-folder system** - Regular backups + daily archive
+- ✅ **Indian Standard Time (IST)** - All timestamps in Asia/Kolkata timezone
+- ✅ **Smart rotation** - Keeps only the latest backups (configurable)
+- ✅ **No OAuth hassle** - Uses Google Service Account (fully automated)
+- ✅ **Detailed logging** - Daily log files with complete audit trail
+- ✅ **Error recovery** - Automatic cleanup on failures
+
+## 📋 Table of Contents
+
+- [Requirements](#requirements)
+- [Google Cloud Setup](#google-cloud-setup)
+- [Installation (Node.js)](#installation-nodejs)
+- [Installation (Python)](#installation-python)
+- [Configuration](#configuration)
+- [Running the Script](#running-the-script)
+- [Backup Schedule](#backup-schedule)
+- [Folder Structure](#folder-structure)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## 📋 Requirements
+## 🔧 Requirements
 
-### 1. **Node.js & npm Or Python**
-- Node.js v14 or higher
-- npm (comes with Node.js)
-- Python Works
+### For Node.js Version
+- Node.js 14 or higher
+- npm or yarn
 
-```bash
-# Check your versions
-node --version
-npm --version
-python --version
-```
+### For Python Version
+- Python 3.7 or higher
+- pip
 
-### 2. **Pterodactyl Panel**
-- Active Pterodactyl panel installation
-- API key with backup permissions
-- Server ID
-
-### 3. **Google Cloud Project**
-- Google account
-- Google Cloud Console access
-- Google Drive API enabled
-
-### 4. **System Requirements**
-- Sufficient disk space for temporary backup files
-- Stable internet connection
-- Linux/Windows/macOS compatible
+### Common Requirements
+- Pterodactyl Panel with API access
+- Google Cloud account (free tier works fine)
+- Google Drive with two folders created
 
 ---
 
-## 📦 Installation
+## 🌐 Google Cloud Setup
 
-### Step 1: Clone/Download the Script
+### Step 1: Create Google Cloud Project
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Click **Select a Project** → **New Project**
+3. Enter project name (e.g., `pterodactyl-backup`)
+4. Click **Create**
+
+### Step 2: Enable Google Drive API
+
+1. In the Google Cloud Console, search for **"Drive API"**
+2. Click **Google Drive API**
+3. Click **Enable**
+
+### Step 3: Create Service Account
+
+1. Go to **IAM & Admin** → **Service Accounts**
+2. Click **Create Service Account**
+3. Enter details:
+   - **Name**: `pterodactyl-backup`
+   - **Description**: Service account for automated backups
+4. Click **Create and Continue**
+5. **Skip** the "Grant access" section → Click **Continue**
+6. **Skip** the "Grant users access" section → Click **Done**
+
+### Step 4: Generate Service Account Key
+
+1. Click on the service account you just created
+2. Go to the **Keys** tab
+3. Click **Add Key** → **Create New Key**
+4. Select **JSON** format
+5. Click **Create**
+6. **Save the downloaded file as `service-account.json`** in your project directory
+
+### Step 5: Create Google Drive Folders
+
+1. Open [Google Drive](https://drive.google.com/)
+2. Create a main folder (e.g., `Pterodactyl Backups`)
+3. Inside that folder, create a subfolder named `days`
+4. Copy both folder IDs:
+   - Open the folder
+   - Look at the URL: `https://drive.google.com/drive/folders/FOLDER_ID_HERE`
+   - Copy the `FOLDER_ID_HERE` part
+
+### Step 6: Share Folders with Service Account
+
+**⚠️ CRITICAL STEP - Don't skip this!**
+
+1. Open the `service-account.json` file
+2. Find the `client_email` field (looks like `xxxxx@xxxxx.iam.gserviceaccount.com`)
+3. Copy this email address
+4. In Google Drive, for **BOTH** folders:
+   - Right-click the folder → **Share**
+   - Paste the service account email
+   - Change permission to **Editor**
+   - Uncheck "Notify people"
+   - Click **Share**
+
+---
+
+## 📦 Installation (Node.js)
+
+### 1. Clone or Download
 
 ```bash
 # Create project directory
 mkdir pterodactyl-backup
 cd pterodactyl-backup
-
-# Copy the script file (save as index.js)
-# Copy package.json dependencies
 ```
 
-### Step 2: Install Dependencies
-
-## For Py Use this 
+### 2. Install Dependencies
 
 ```bash
-pip install requests schedule python-dotenv google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client pytz
+npm init -y
+npm install dotenv axios node-cron googleapis dayjs
 ```
 
+### 3. Create Files
 
-## For Nodejs Do This
-Create a `package.json` file:
+Create `index.js` with the provided Node.js code.
 
-```json
-{
-  "name": "pterodactyl-auto-backup",
-  "version": "2.0.0",
-  "description": "Automated Pterodactyl backup with Google Drive",
-  "main": "index.js",
-  "author": "Blamingyt",
-  "license": "MIT",
-  "dependencies": {
-    "axios": "^1.6.0",
-    "dayjs": "^1.11.10",
-    "dotenv": "^16.3.1",
-    "googleapis": "^128.0.0",
-    "node-cron": "^3.0.3"
-  }
-}
-```
+### 4. Setup Environment
 
-Install packages:
-
-```bash
-npm install
-```
-
----
-
-## 🔧 Configuration
-
-### Step 1: Get Pterodactyl API Key
-
-1. Login to your Pterodactyl panel
-2. Go to **Account Settings** → **API Credentials**
-3. Click **Create API Key**
-4. Give it a description (e.g., "Backup Script")
-5. Copy the generated key (save it securely!)
-
-### Step 2: Get Server ID
-
-1. Go to your server in Pterodactyl
-2. Look at the URL: `https://panel.example.com/server/XXXXXXXX`
-3. The `XXXXXXXX` is your Server ID
-
-### Step 3: Setup Google Drive
-
-#### A. Create Google Cloud Project
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Click **New Project**
-3. Name it (e.g., "Pterodactyl Backup")
-4. Click **Create**
-
-#### B. Enable Google Drive API
-
-1. In your project, go to **APIs & Services** → **Library**
-2. Search for "Google Drive API"
-3. Click it and press **Enable**
-
-#### C. Create OAuth 2.0 Credentials
-
-1. Go to **APIs & Services** → **Credentials**
-2. Click **Create Credentials** → **OAuth client ID**
-3. If prompted, configure OAuth consent screen:
-   - Choose **External**
-   - Fill in app name (e.g., "Backup Script")
-   - Add your email as test user
-   - Save
-4. Back to Create OAuth client ID:
-   - Application type: **Desktop app**
-   - Name: "Backup Script"
-   - Click **Create**
-5. **Download JSON** file
-6. Rename it to `credentials.json` and place in project folder
-
-#### D. Get Google Drive Folder IDs
-
-**For Main Backups Folder:**
-1. Create a folder in Google Drive (e.g., "Server Backups")
-2. Open the folder
-3. Look at URL: `https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXXXXX`
-4. Copy the folder ID (`XXXXXXXXXXXXXXXXXXX`)
-
-**For Daily Snapshots Folder:**
-1. Inside "Server Backups", create a subfolder called "days"
-2. Open it and copy its folder ID the same way
-
-### Step 4: Create Environment File
-
-Create a `.env` file in your project folder:
+Create `.env` file:
 
 ```env
 # Pterodactyl Configuration
 PTERO_API_KEY=your_pterodactyl_api_key_here
-PTERO_PANEL_URL=https://panel.example.com
-PTERO_SERVER_ID=your_server_id_here
+PTERO_PANEL_URL=https://panel.yourdomain.com
+PTERO_SERVER_ID=your_server_identifier
 
 # Google Drive Configuration
-GOOGLE_DRIVE_FOLDER_ID=your_main_folder_id_here
-GOOGLE_DRIVE_DAYS_FOLDER_ID=your_days_folder_id_here
+GOOGLE_DRIVE_FOLDER_ID=main_folder_id_from_drive
+GOOGLE_DRIVE_DAYS_FOLDER_ID=days_subfolder_id_from_drive
 ```
 
-**Example:**
-```env
-PTERO_API_KEY=ptlc_1234567890abcdefghijklmnopqrstuvwxyz
-PTERO_PANEL_URL=https://panel.myserver.com
-PTERO_SERVER_ID=a1b2c3d4
+### 5. Add Service Account File
 
-GOOGLE_DRIVE_FOLDER_ID=1AbCdEfGhIjKlMnOpQrStUvWxYz
-GOOGLE_DRIVE_DAYS_FOLDER_ID=2BcDeFgHiJkLmNoPqRsTuVwXyZ
-```
+Place your `service-account.json` in the project directory.
 
----
-
-## 🚀 First Run & Authentication
-
-### Run the Script
+### 6. Run
 
 ```bash
 node index.js
 ```
 
-### Google OAuth Authentication
+---
 
-On first run, you'll see:
+## 🐍 Installation (Python)
 
+### 1. Clone or Download
+
+```bash
+# Create project directory
+mkdir pterodactyl-backup
+cd pterodactyl-backup
 ```
-🔐 Authorize this app by visiting this URL:
 
-https://accounts.google.com/o/oauth2/v2/auth?...
+### 2. Install Dependencies
 
-Enter the code from that page here:
+```bash
+pip install requests schedule python-dotenv google-auth google-api-python-client pytz
 ```
 
-**Steps:**
-1. Copy the URL and open in browser
-2. Login with your Google account
-3. Click **Allow** to grant permissions
-4. Copy the authorization code **From The Url**
-5. Paste it in the terminal
-6. Press Enter
+Or using `requirements.txt`:
 
-The script will save a `token.json` file for future use.
+Create `requirements.txt`:
+```txt
+requests>=2.28.0
+schedule>=1.1.0
+python-dotenv>=0.20.0
+google-auth>=2.16.0
+google-api-python-client>=2.70.0
+pytz>=2022.7
+```
+
+Then install:
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Create Files
+
+Create `backup.py` with the provided Python code.
+
+### 4. Setup Environment
+
+Create `.env` file:
+
+```env
+# Pterodactyl Configuration
+PTERO_API_KEY=your_pterodactyl_api_key_here
+PTERO_PANEL_URL=https://panel.yourdomain.com
+PTERO_SERVER_ID=your_server_identifier
+
+# Google Drive Configuration
+GOOGLE_DRIVE_FOLDER_ID=main_folder_id_from_drive
+GOOGLE_DRIVE_DAYS_FOLDER_ID=days_subfolder_id_from_drive
+```
+
+### 5. Add Service Account File
+
+Place your `service-account.json` in the project directory.
+
+### 6. Run
+
+```bash
+python backup.py
+```
 
 ---
 
-## 📁 Project Structure
+## ⚙️ Configuration
+
+### Getting Pterodactyl API Key
+
+1. Log into your Pterodactyl panel
+2. Go to **Account Settings** → **API Credentials**
+3. Click **Create New**
+4. Give it a description (e.g., "Backup Script")
+5. Copy the generated API key
+6. **Important**: Copy it immediately - you won't see it again!
+
+### Getting Server ID
+
+1. Go to your server in Pterodactyl panel
+2. Look at the URL: `https://panel.yourdomain.com/server/SERVER_ID`
+3. Copy the `SERVER_ID` part
+
+### Adjustable Settings
+
+You can modify these in the script:
+
+```javascript
+// Node.js (in config object)
+maxBackups: 3,              // Max backups in main folder
+maxDailyBackups: 5,         // Max backups in days folder
+initialDelay: 30000,        // Wait time after backup creation (30s)
+pollInterval: 10000,        // Check interval for backup completion (10s)
+pollTimeout: 900000,        // Max wait time for backup (15 min)
+```
+
+```python
+# Python (in Config class)
+MAX_BACKUPS = 3              # Max backups in main folder
+MAX_DAILY_BACKUPS = 5        # Max backups in days folder
+INITIAL_DELAY = 30           # Wait time after backup creation (30s)
+POLL_INTERVAL = 10           # Check interval for backup completion (10s)
+POLL_TIMEOUT = 900           # Max wait time for backup (15 min)
+```
+
+---
+
+## 📅 Backup Schedule
+
+### Regular Backups
+- **Frequency**: Every 20 minutes
+- **Location**: Main Google Drive folder
+- **Retention**: Latest 3 backups
+- **Filename Format**: `26-NOV-11PM.tar.gz`
+
+### Daily Backups
+- **Frequency**: Daily at 11:59 PM IST
+- **Location**: Days subfolder
+- **Retention**: Latest 5 days
+- **Filename Format**: `26-Nov-2025.tar.gz`
+
+### Automatic Rotation
+
+The script automatically:
+1. Deletes oldest Pterodactyl backup when limit reached (before creating new)
+2. Keeps only the latest 3 backups in main folder
+3. Keeps only the latest 5 daily backups in days folder
+4. Deletes backup from Pterodactyl after successful upload
+
+---
+
+## 📁 Folder Structure
 
 ```
 pterodactyl-backup/
-├── index.js                 # Main script
-├── package.json             # Dependencies
-├── .env                     # Configuration (DO NOT SHARE!)
-├── credentials.json         # Google OAuth credentials (DO NOT SHARE!)
-├── token.json              # Generated after first auth (DO NOT SHARE!)
-├── temp_backups/           # Temporary download folder (auto-created)
-├── logs/                   # Daily log files (auto-created)
-│   └── backup_2025-11-26.log
-└── README.md               # This file
+├── index.js / backup.py       # Main script
+├── .env                        # Environment variables
+├── service-account.json        # Google service account credentials
+├── package.json               # Node.js dependencies (if using Node)
+├── requirements.txt           # Python dependencies (if using Python)
+├── temp_backups/              # Temporary download location (auto-created)
+└── logs/                      # Daily log files (auto-created)
+    ├── backup_2025-11-26.log
+    ├── backup_2025-11-27.log
+    └── ...
+```
+
+### Google Drive Structure
+
+```
+Pterodactyl Backups/          # Main folder
+├── 26-NOV-11PM.tar.gz        # Regular backups (keeps 3)
+├── 26-NOV-01PM.tar.gz
+├── 26-NOV-03AM.tar.gz
+└── days/                      # Days subfolder
+    ├── 26-Nov-2025.tar.gz    # Daily backups (keeps 5)
+    ├── 27-Nov-2025.tar.gz
+    ├── 28-Nov-2025.tar.gz
+    ├── 29-Nov-2025.tar.gz
+    └── 30-Nov-2025.tar.gz
 ```
 
 ---
 
-## ⚙️ How It Works
+## 🐛 Troubleshooting
 
-### Regular Backups (Every 20 Minutes)
-1. Checks Pterodactyl backup count
-2. If limit reached, deletes oldest backup
-3. Creates new backup
-4. Waits for completion
-5. Downloads backup file
-6. Uploads to Google Drive main folder
-7. Keeps last 3 backups in main folder
-8. Deletes backup from Pterodactyl
-9. Cleans up local temp file
+### "Missing required environment variables"
 
-### Daily Snapshots (11:59 PM IST)
-1. All regular backup steps above, PLUS:
-2. Uploads to "days" subfolder
-3. Keeps last 5 daily backups
-4. Deletes backups older than 5 days
+**Solution**: Check your `.env` file has all required variables set correctly.
 
----
+### "Service account file not found"
 
-## 🎛️ Customization
+**Solution**: Make sure `service-account.json` is in the same directory as the script.
 
-Edit these values in `index.js`:
+### "Failed to initialize Google Drive"
 
+**Solutions**:
+1. Verify `service-account.json` is valid JSON
+2. Check you've enabled Google Drive API in Google Cloud Console
+3. Ensure the service account email has Editor access to both folders
+
+### "Backup limit reached" but no backups visible
+
+**Solution**: Check if backups exist in Pterodactyl panel. The script checks for 3+ backups before creating new ones.
+
+### Uploads failing with 404 error
+
+**Solution**: 
+1. Verify folder IDs are correct
+2. Confirm service account has Editor access to folders
+3. Check folders haven't been moved or deleted
+
+### Wrong timezone in logs
+
+**Solution**: Script uses Asia/Kolkata (IST) timezone. If you need different timezone, modify:
+
+**Node.js**:
 ```javascript
-const config = {
-  ptero: {
-    maxBackupsOnServer: 2,    // Max backups on Pterodactyl
-  },
-  maxBackups: 3,              // Max backups in main folder
-  maxDailyBackups: 5,         // Max daily snapshots (days)
-  initialDelay: 30000,        // Wait time before checking (30s)
-  pollInterval: 10000,        // Check interval (10s)
-  pollTimeout: 900000,        // Max wait time (15 min)
-};
+dayjs.tz.setDefault('Asia/Kolkata');  // Change timezone here
 ```
 
-**Change backup schedule** (default: every 20 minutes):
-
-```javascript
-cron.schedule('*/20 * * * *', async () => {
-  await runBackupCycle();
-}, {
-  timezone: 'Asia/Kolkata'
-});
+**Python**:
+```python
+TIMEZONE = pytz.timezone('Asia/Kolkata')  # Change timezone here
 ```
 
-Cron schedule examples:
-- `*/20 * * * *` - Every 20 minutes
-- `0 * * * *` - Every hour
-- `0 */2 * * *` - Every 2 hours
-- `0 0 * * *` - Every day at midnight
+### Script stops after error
+
+**Solution**: The script includes error recovery and will continue running. Check logs for details. Common issues:
+- Network timeouts (will retry next cycle)
+- Pterodactyl backup failures (cleans up and tries next time)
+- Google Drive quota exceeded (upgrade storage or reduce retention)
 
 ---
 
+## 🔐 Security Best Practices
 
-### 🥀Access Details
+1. **Never commit** `.env` or `service-account.json` to version control
+2. Add to `.gitignore`:
+   ```
+   .env
+   service-account.json
+   temp_backups/
+   logs/
+   ```
+3. Keep API keys secure and rotate periodically
+4. Use service account with minimum required permissions
+5. Regularly review Google Drive shared folder access
 
+---
 
-## 🏃 Running as a Service
+## 🚀 Running as a Service
 
-### Using PM2 (Recommended)
+### Linux (systemd)
 
-```bash
-# Install PM2 globally
-npm install -g pm2
+Create `/etc/systemd/system/pterodactyl-backup.service`:
 
-# Start the script
-pm2 start index.js --name pterodactyl-backup
-
-# Auto-start on system boot
-pm2 startup
-pm2 save
-
-# View logs
-pm2 logs pterodactyl-backup
-
-# Stop/restart
-pm2 stop pterodactyl-backup
-pm2 restart pterodactyl-backup
-```
-
-### Using systemd (Linux)
-
-Create `/etc/systemd/system/ptero-backup.service`:
-
+**For Node.js**:
 ```ini
 [Unit]
-Description=Pterodactyl Auto Backup
+Description=Pterodactyl Backup Service
 After=network.target
 
 [Service]
 Type=simple
-User=your_username
+User=your-username
 WorkingDirectory=/path/to/pterodactyl-backup
 ExecStart=/usr/bin/node index.js
 Restart=always
@@ -339,98 +407,68 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+**For Python**:
+```ini
+[Unit]
+Description=Pterodactyl Backup Service
+After=network.target
 
+[Service]
+Type=simple
+User=your-username
+WorkingDirectory=/path/to/pterodactyl-backup
+ExecStart=/usr/bin/python3 backup.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable ptero-backup
-sudo systemctl start ptero-backup
-sudo systemctl status ptero-backup
+sudo systemctl enable pterodactyl-backup
+sudo systemctl start pterodactyl-backup
+sudo systemctl status pterodactyl-backup
 ```
+
+### Windows (Task Scheduler)
+
+1. Open Task Scheduler
+2. Create Basic Task
+3. Set trigger: "At system startup"
+4. Action: "Start a program"
+   - **Node.js**: `C:\Program Files\nodejs\node.exe`
+   - **Python**: `C:\Python3\python.exe`
+5. Add arguments: Full path to your script
+6. Set working directory to script location
 
 ---
 
-## 📊 File Naming
+## 📊 Monitoring
 
-### Main Folder
-- Format: `DD-MMM-hA.tar.gz`
-- Example: `26-Nov-11PM.tar.gz`
+### Check Logs
 
-### Days Folder
-- Format: `DD-MMM-YYYY.tar.gz`
-- Example: `26-Nov-2025.tar.gz`
+```bash
+# View today's log
+tail -f logs/backup_$(date +%Y-%m-%d).log
 
-### Logs
-- Format: `backup_YYYY-MM-DD.log`
-- Example: `backup_2025-11-26.log`
+# View all logs
+ls -lh logs/
+```
+
+### Verify Backups
+
+1. Check Google Drive folders for uploaded files
+2. Verify file sizes are reasonable
+3. Check log files for "✅ Backup cycle completed!"
 
 ---
 
-## 🐛 Troubleshooting
+## 📝 License
 
-### Error: "Missing required environment variables"
-- Check your `.env` file exists
-- Verify all variables are set
-- No spaces around `=` sign
-
-### Error: "Error loading credentials.json"
-- Download OAuth credentials from Google Cloud Console
-- Rename to `credentials.json`
-- Place in project root folder
-
-### Backup stuck at "Waiting for backup to complete"
-- Increase `pollTimeout` in config
-- Check Pterodactyl panel for errors
-- Verify server has enough disk space
-
-### Google Drive upload fails
-- Delete `token.json` and re-authenticate
-- Check folder IDs are correct
-- Verify folders exist in Google Drive
-- Check folder permissions
-
-### Wrong timezone
-- Script uses `Asia/Kolkata` (IST) by default
-- Check system timezone doesn't override it
-- Verify dayjs timezone plugin is working
-
----
-
-## 🔒 Security Notes
-
-**NEVER share or commit these files:**
-- `.env` - Contains API keys
-- `credentials.json` - Contains OAuth secrets
-- `token.json` - Contains access tokens
-
-Add to `.gitignore`:
-```
-.env
-credentials.json
-token.json
-temp_backups/
-logs/
-node_modules/
-```
-
----
-
-## 📝 Logs
-
-Daily log files are created in the `logs/` folder:
-
-```
-logs/
-├── backup_2025-11-26.log
-├── backup_2025-11-27.log
-└── backup_2025-11-28.log
-```
-
-Each entry includes:
-- Timestamp in IST
-- Action performed
-- Success/error messages
-- File sizes
+This project is provided as-is for personal and commercial use.
 
 ---
 
@@ -438,40 +476,21 @@ Each entry includes:
 
 If you encounter issues:
 
-1. Check the logs in `logs/` folder
-2. Verify all configuration steps
-3. Test Pterodactyl API key manually
-4. Ensure Google Drive folders are accessible
-5. Check system has enough disk space
+1. Check the [Troubleshooting](#troubleshooting) section
+2. Review log files in the `logs/` directory
+3. Verify all configuration steps were completed
+4. Ensure Google Drive API quotas haven't been exceeded
 
 ---
 
-## 📜 License
+## 🎉 Credits
 
-MIT License - Free to use and modify
-
----
-
-## 👤 Owner
-
-**Blamingyt**
-
-Created with ❤️ for the Pterodactyl community
+Built with:
+- [Pterodactyl Panel](https://pterodactyl.io/)
+- [Google Drive API](https://developers.google.com/drive)
+- Node.js: axios, node-cron, googleapis, dayjs
+- Python: requests, schedule, google-api-python-client, pytz
 
 ---
 
-## 🌟 Features Summary
-
-| Feature | Description |
-|---------|-------------|
-| 🔄 Auto Backup | Every 30 minutes |
-| 🌏 IST Timezone | Indian Standard Time |
-| 📁 Main Storage | Last 3 backups |
-| 📅 Daily Archive | Last 5 days at 11:59 PM |
-| 🗑️ Auto Cleanup | Pterodactyl & Google Drive |
-| 📝 Logging | Daily log files |
-| 🔐 Secure | OAuth 2.0 authentication |
-
----
-
-**Happy Backing Up! 🎉**
+**Happy Backing Up! 🚀**
