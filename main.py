@@ -4,6 +4,7 @@ import time
 import json
 import requests
 import schedule
+import threading
 from datetime import datetime
 from pathlib import Path
 import pytz
@@ -11,8 +12,9 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from dotenv import load_dotenv
+import io
 
 # Load environment variables
 load_dotenv()
@@ -255,6 +257,25 @@ class PterodactylClient:
             logger.info("✅ Backup deleted from Pterodactyl")
         except Exception as e:
             logger.error(f"⚠️  Failed to delete backup: {str(e)}")
+    
+    def upload_backup_to_server(self, local_path):
+        """Upload backup file to Pterodactyl server"""
+        logger.info("📤 Uploading backup to Pterodactyl server...")
+        
+        # Get upload URL
+        url = f"{self.base_url}/servers/{config.PTERO_SERVER_ID}/files/upload"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        upload_url = response.json()['attributes']['url']
+        
+        # Upload file
+        with open(local_path, 'rb') as f:
+            files = {'files': (local_path.name, f, 'application/gzip')}
+            upload_response = requests.post(upload_url, files=files)
+            upload_response.raise_for_status()
+        
+        logger.info("✅ Backup uploaded to server successfully!")
+        return True
 
 # ==================== FILE OPERATIONS ====================
 def download_backup(download_url, local_path):
@@ -318,6 +339,27 @@ def cleanup_old_backups(drive_service, folder_id, max_backups):
         for file in files_to_delete:
             drive_service.files().delete(fileId=file['id']).execute()
             logger.info(f"   ✅ Deleted: {file['name']}")
+
+def download_from_drive(drive_service, file_id, local_path):
+    """Download file from Google Drive"""
+    logger.info(f"⬇️  Downloading from Google Drive...")
+    
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        if status:
+            logger.info(f"   Download progress: {int(status.progress() * 100)}%")
+    
+    with open(local_path, 'wb') as f:
+        f.write(fh.getvalue())
+    
+    file_size = os.path.getsize(local_path) / 1024 / 1024
+    logger.info(f"✅ Download complete: {file_size:.2f} MB")
+    return local_path
 
 # ==================== BACKUP CYCLE ====================
 def run_backup_cycle(is_daily_backup=False):
@@ -390,6 +432,94 @@ def job_daily_backup():
     """Scheduled job for daily backups"""
     run_backup_cycle(is_daily_backup=True)
 
+# ==================== RESTORE COMMAND ====================
+def restore_backup_from_drive(file_id):
+    """Download backup from Google Drive and upload to Pterodactyl server"""
+    logger.info("\n" + "=" * 60)
+    logger.info("🔄 RESTORE BACKUP FROM GOOGLE DRIVE")
+    logger.info("=" * 60)
+    
+    local_path = None
+    
+    try:
+        # Initialize clients
+        drive_service = authorize_google()
+        ptero = PterodactylClient()
+        
+        # Get file info
+        file_info = drive_service.files().get(fileId=file_id, fields='name, size').execute()
+        filename = file_info['name']
+        file_size_mb = int(file_info.get('size', 0)) / 1024 / 1024
+        
+        logger.info(f"📋 File: {filename} ({file_size_mb:.2f} MB)")
+        logger.info(f"📋 File ID: {file_id}")
+        
+        # Download from Google Drive
+        local_path = config.TEMP_DIR / f"restore_{filename}"
+        download_from_drive(drive_service, file_id, local_path)
+        
+        # Upload to Pterodactyl server
+        ptero.upload_backup_to_server(local_path)
+        
+        # Cleanup
+        if local_path.exists():
+            local_path.unlink()
+            logger.info("🗑️  Local file deleted")
+        
+        logger.info("✅ Restore completed successfully!")
+        logger.info("=" * 60 + "\n")
+        
+    except Exception as e:
+        logger.error(f"❌ Restore failed: {str(e)}")
+        
+        if local_path and local_path.exists():
+            local_path.unlink()
+        
+        logger.info("=" * 60 + "\n")
+
+# ==================== COMMAND HANDLER ====================
+def command_listener():
+    """Listen for user commands in console"""
+    while True:
+        try:
+            command = input()
+            parts = command.strip().split(maxsplit=1)
+            
+            if not parts:
+                continue
+            
+            cmd = parts[0].lower()
+            
+            if cmd == 'upload':
+                if len(parts) < 2:
+                    print("❌ Usage: upload <google_drive_file_id>")
+                    print("Example: upload 1a2b3c4d5e6f7g8h9i0j")
+                    continue
+                
+                file_id = parts[1].strip()
+                restore_backup_from_drive(file_id)
+            
+            elif cmd == 'help':
+                print("\n📚 Available Commands:")
+                print("  upload <file_id>  - Download backup from Google Drive and upload to server")
+                print("  help              - Show this help message")
+                print("  exit              - Stop the script")
+                print()
+            
+            elif cmd == 'exit':
+                print("👋 Exiting...")
+                logger.close()
+                os._exit(0)
+            
+            else:
+                print(f"❌ Unknown command: {cmd}")
+                print("Type 'help' for available commands")
+        
+        except EOFError:
+            break
+        except Exception as e:
+            print(f"❌ Error: {str(e)}")
+
 # ==================== MAIN ====================
 def main():
     logger.info("\n🎯 Pterodactyl Auto-Backup (Python Version)\n")
@@ -425,7 +555,15 @@ def main():
         schedule.every().day.at("23:59").do(job_daily_backup)
         logger.info("✅ Daily backup scheduled: 11:59 PM IST")
     
-    logger.info("📝 Press Ctrl+C to stop\n")
+    logger.info("\n📝 Available Commands:")
+    logger.info("  upload <file_id>  - Restore backup from Google Drive")
+    logger.info("  help      - Show help message")
+    logger.info("  exit              - Stop the script")
+    logger.info("\n💡 Type a command or press Ctrl+C to stop\n")
+    
+    # Start command listener in separate thread
+    cmd_thread = threading.Thread(target=command_listener, daemon=True)
+    cmd_thread.start()
     
     # Run scheduler
     try:
